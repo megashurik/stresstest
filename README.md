@@ -28,13 +28,13 @@ python stresstest.py http://example.com -n 1000 -t 20 -w 5 --output json
 ```
 
 ## Parameters
-`-n, --num_requests`: Total number of requests to make
-`-d, --duration`: Test duration in seconds
-`-t, --threads`: Number of concurrent threads (default: 10)
-`-w, --warmup`: Warmup duration in seconds
-`--timeout`: Request timeout in seconds (default: 30)
-`--output`: Save results in 'json' or 'csv' format
-`--output-file`: Custom filename for results
+- `-n, --num_requests`: Total number of requests to make
+- `-d, --duration`: Test duration in seconds
+- `-t, --threads`: Number of concurrent threads (default: 10)
+- `-w, --warmup`: Warmup duration in seconds
+- `--timeout`: Request timeout in seconds (default: 30)
+- `--output`: Save results in 'json' or 'csv' format
+- `--output-file`: Custom filename for results
 
 ## Example Output
 ```
