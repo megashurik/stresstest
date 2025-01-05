@@ -10,7 +10,7 @@ from collections import defaultdict
 from tqdm import tqdm
 import sys
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 class RequestStats:
     def __init__(self):
@@ -68,10 +68,14 @@ class RequestStats:
 def make_request(url, timeout, stop_event):
     if stop_event.is_set():
         return None, None, None
-    
+
+    headers = {
+        'User-Agent': f'Stresstest/{VERSION}'
+    }
+
     try:
         start_time = time.time()
-        response = requests.get(url, timeout=timeout)
+        response = requests.get(url, timeout=timeout, headers=headers)
         response_time = time.time() - start_time
         return response.status_code == 200, response_time, None
     except requests.Timeout:
