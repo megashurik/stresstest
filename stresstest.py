@@ -10,7 +10,7 @@ from collections import defaultdict
 from tqdm import tqdm
 import sys
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 class RequestStats:
     def __init__(self):
@@ -181,13 +181,15 @@ def main():
     print(f"Successful requests: {results['successful_requests']}")
     print(f"Success rate: {results['success_rate']:.2f}%")
     print(f"Requests per second: {results['requests_per_second']:.2f}")
-    print("\nResponse time (seconds):")
-    print(f"Minimum: {results['min_response_time']:.3f}")
-    print(f"Maximum: {results['max_response_time']:.3f}")
-    print(f"Average: {results['avg_response_time']:.3f}")
-    print(f"Median: {results['median_response_time']:.3f}")
-    print(f"95th percentile: {results['p95_response_time']:.3f}")
-    print(f"99th percentile: {results['p99_response_time']:.3f}")
+    
+    if results['successful_requests'] > 0:
+        print("\nResponse time (seconds):")
+        print(f"Minimum: {results['min_response_time']:.3f}")
+        print(f"Maximum: {results['max_response_time']:.3f}")
+        print(f"Average: {results['avg_response_time']:.3f}")
+        print(f"Median: {results['median_response_time']:.3f}")
+        print(f"95th percentile: {results['p95_response_time']:.3f}")
+        print(f"99th percentile: {results['p99_response_time']:.3f}")
     
     if results['errors']:
         print("\nErrors:")

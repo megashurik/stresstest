@@ -10,7 +10,7 @@ from collections import defaultdict
 from tqdm import tqdm
 import sys
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 class RequestStats:
     def __init__(self):
@@ -35,15 +35,19 @@ class RequestStats:
         return statistics.quantiles(self.response_times, n=100)[p-1]
 
     def get_stats(self):
+        duration = self.end_time - self.start_time
+        
         if not self.response_times:
             return {
                 "total_requests": self.total_requests,
                 "successful_requests": self.successful_requests,
                 "error_count": sum(self.errors.values()),
-                "errors": dict(self.errors)
+                "errors": dict(self.errors),
+                "requests_per_second": self.total_requests / duration,
+                "success_rate": 0.0,  # добавляем эти поля даже если нет успешных запросов
+                "total_duration": duration
             }
 
-        duration = self.end_time - self.start_time
         return {
             "total_requests": self.total_requests,
             "successful_requests": self.successful_requests,
@@ -59,6 +63,7 @@ class RequestStats:
             "errors": dict(self.errors),
             "total_duration": duration
         }
+
 
 def make_request(url, timeout, stop_event):
     if stop_event.is_set():
@@ -181,13 +186,15 @@ def main():
     print(f"Успешных запросов: {results['successful_requests']}")
     print(f"Процент успешных: {results['success_rate']:.2f}%")
     print(f"Запросов в секунду: {results['requests_per_second']:.2f}")
-    print("\nВремя ответа (секунды):")
-    print(f"Минимальное: {results['min_response_time']:.3f}")
-    print(f"Максимальное: {results['max_response_time']:.3f}")
-    print(f"Среднее: {results['avg_response_time']:.3f}")
-    print(f"Медиана: {results['median_response_time']:.3f}")
-    print(f"95-й процентиль: {results['p95_response_time']:.3f}")
-    print(f"99-й процентиль: {results['p99_response_time']:.3f}")
+    
+    if results['successful_requests'] > 0:
+        print("\nВремя ответа (секунды):")
+        print(f"Минимальное: {results['min_response_time']:.3f}")
+        print(f"Максимальное: {results['max_response_time']:.3f}")
+        print(f"Среднее: {results['avg_response_time']:.3f}")
+        print(f"Медиана: {results['median_response_time']:.3f}")
+        print(f"95-й процентиль: {results['p95_response_time']:.3f}")
+        print(f"99-й процентиль: {results['p99_response_time']:.3f}")
     
     if results['errors']:
         print("\nОшибки:")
