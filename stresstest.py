@@ -10,6 +10,8 @@ from collections import defaultdict
 from tqdm import tqdm
 import sys
 
+VERSION = "1.0.0"
+
 class RequestStats:
     def __init__(self):
         self.response_times = []
@@ -139,7 +141,7 @@ def save_results(stats, output_format, filename):
                 writer.writerow([key, value])
 
 def main():
-    parser = argparse.ArgumentParser(description='Web server load testing tool')
+    parser = argparse.ArgumentParser(description=f'Web resource load testing tool v{VERSION}')
     parser.add_argument('url', help='Target URL')
     parser.add_argument('-n', '--num_requests', type=int, help='Number of requests')
     parser.add_argument('-d', '--duration', type=float, help='Test duration in seconds')
@@ -152,6 +154,7 @@ def main():
     parser.add_argument('--output', choices=['json', 'csv'],
                         help='Output format')
     parser.add_argument('--output-file', help='Output file')
+    parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {VERSION}')
     
     args = parser.parse_args()
     
