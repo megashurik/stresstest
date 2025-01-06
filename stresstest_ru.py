@@ -1,16 +1,15 @@
-﻿import requests
+﻿import aiohttp
+import asyncio
 import time
 import argparse
-from concurrent.futures import ThreadPoolExecutor
-import threading
+from tqdm import tqdm
 import statistics
 import json
 import csv
 from collections import defaultdict
-from tqdm import tqdm
 import sys
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 class RequestStats:
     def __init__(self):
@@ -44,7 +43,7 @@ class RequestStats:
                 "error_count": sum(self.errors.values()),
                 "errors": dict(self.errors),
                 "requests_per_second": self.total_requests / duration,
-                "success_rate": 0.0,  # добавляем эти поля даже если нет успешных запросов
+                "success_rate": 0.0,
                 "total_duration": duration
             }
 
@@ -64,74 +63,76 @@ class RequestStats:
             "total_duration": duration
         }
 
-
-def make_request(url, timeout, stop_event):
-    if stop_event.is_set():
-        return None, None, None
-
-    headers = {
-        'User-Agent': f'Stresstest/{VERSION}'
-    }
-
+async def make_request(session, url, timeout, headers):
     try:
         start_time = time.time()
-        response = requests.get(url, timeout=timeout, headers=headers)
-        response_time = time.time() - start_time
-        return response.status_code == 200, response_time, None
-    except requests.Timeout:
+        async with session.get(url, timeout=timeout, headers=headers) as response:
+            response_time = time.time() - start_time
+            if response.status == 200:
+                return True, response_time, None
+            else:
+                return False, None, f"HTTP_{response.status}"
+    except asyncio.TimeoutError:
         return False, None, "timeout"
-    except requests.ConnectionError:
-        return False, None, "connection_error"
-    except Exception as e:
+    except aiohttp.ClientError as e:
         return False, None, str(type(e).__name__)
 
-def warmup(url, target_threads, warmup_duration, timeout):
+async def warmup(url, target_concurrency, warmup_duration, timeout, headers):
     print("\nРазогрев системы...")
-    current_threads = 1
+    current_concurrency = 1
     start_time = time.time()
     
-    while current_threads <= target_threads:
+    while current_concurrency <= target_concurrency:
         if time.time() - start_time >= warmup_duration:
             break
             
-        with ThreadPoolExecutor(max_workers=current_threads) as executor:
-            for _ in range(current_threads):
-                executor.submit(make_request, url, timeout, threading.Event())
-        print(f"Разогрев: {current_threads} потоков")
-        current_threads *= 2
-        if current_threads > target_threads:
-            current_threads = target_threads
+        connector = aiohttp.TCPConnector(limit=0)  # Снимаем ограничение на соединения
+        async with aiohttp.ClientSession(connector=connector) as session:
+            tasks = [make_request(session, url, timeout, headers) for _ in range(current_concurrency)]
+            await asyncio.gather(*tasks)
+        
+        print(f"Разогрев: {current_concurrency} одновременных запросов")
+        current_concurrency *= 2
+        if current_concurrency > target_concurrency:
+            current_concurrency = target_concurrency
 
-def test_load(url, num_requests, duration, num_threads, timeout, warmup_time):
+async def test_load(url, num_requests, duration, concurrency, timeout, warmup_time, headers):
     stats = RequestStats()
-    stop_event = threading.Event()
-    
-    if warmup_time:
-        warmup(url, num_threads, warmup_time, timeout)
+    stop_event = asyncio.Event()
+    semaphore = asyncio.Semaphore(concurrency)  # Ограничиваем количество одновременных запросов
+    request_counter = 0  # Счётчик запросов
+    request_counter_lock = asyncio.Lock()  # Блокировка для атомарного увеличения счётчика
 
-    def worker(url, pbar):
+    if warmup_time:
+        await warmup(url, concurrency, warmup_time, timeout, headers)
+
+    async def worker(url, pbar):
+        nonlocal request_counter
         while not stop_event.is_set():
-            if num_requests and stats.total_requests >= num_requests:
-                stop_event.set()
-                break
+            async with request_counter_lock:
+                if num_requests and request_counter >= num_requests:
+                    stop_event.set()
+                    break
+                request_counter += 1
             
-            success, response_time, error_type = make_request(url, timeout, stop_event)
-            stats.add_response(response_time, success, error_type)
-            pbar.update(1)
+            async with semaphore:  # Ограничиваем количество одновременных запросов
+                connector = aiohttp.TCPConnector(limit=0)  # Снимаем ограничение на соединения
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    success, response_time, error_type = await make_request(session, url, timeout, headers)
+                    stats.add_response(response_time, success, error_type)
+                    pbar.update(1)
 
     print("\nЗапуск тестирования...")
     stats.start_time = time.time()
-    
+
     with tqdm(total=num_requests if num_requests else None, unit="req") as pbar:
-        with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            futures = [executor.submit(worker, url, pbar) for _ in range(num_threads)]
-            
-            if duration:
-                time.sleep(duration)
-                stop_event.set()
-            
-            for future in futures:
-                future.result()
+        tasks = [asyncio.create_task(worker(url, pbar)) for _ in range(concurrency)]
+        
+        if duration:
+            await asyncio.sleep(duration)
+            stop_event.set()
+        
+        await asyncio.gather(*tasks)
 
     stats.end_time = time.time()
     return stats
@@ -149,13 +150,13 @@ def save_results(stats, output_format, filename):
             for key, value in results.items():
                 writer.writerow([key, value])
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description=f'Тест производительности веб-ресурса v{VERSION}')
     parser.add_argument('url', help='URL для тестирования')
     parser.add_argument('-n', '--num_requests', type=int, help='Количество запросов')
     parser.add_argument('-d', '--duration', type=float, help='Длительность теста в секундах')
     parser.add_argument('-t', '--threads', type=int, default=10,
-                        help='Количество потоков (по умолчанию: 10)')
+                        help='Количество одновременных запросов (по умолчанию: 10)')
     parser.add_argument('--timeout', type=float, default=30,
                         help='Timeout для запросов в секундах (по умолчанию: 30)')
     parser.add_argument('-w', '--warmup', type=float,
@@ -163,6 +164,7 @@ def main():
     parser.add_argument('--output', choices=['json', 'csv'],
                         help='Формат вывода результатов')
     parser.add_argument('--output-file', help='Файл для сохранения результатов')
+    parser.add_argument('--header', action='append', help='Добавить пользовательский заголовок (формат: "Key: Value")')
     parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {VERSION}')
     
     args = parser.parse_args()
@@ -173,13 +175,20 @@ def main():
     if args.output and not args.output_file:
         args.output_file = f'results.{args.output}'
 
-    stats = test_load(
+    headers = {'User-Agent': f'Stresstest/{VERSION}'}
+    if args.header:
+        for header in args.header:
+            key, value = header.split(':', 1)
+            headers[key.strip()] = value.strip()
+
+    stats = await test_load(
         args.url,
         args.num_requests,
         args.duration,
         args.threads,
         args.timeout,
-        args.warmup
+        args.warmup,
+        headers
     )
 
     results = stats.get_stats()
@@ -190,6 +199,9 @@ def main():
     print(f"Успешных запросов: {results['successful_requests']}")
     print(f"Процент успешных: {results['success_rate']:.2f}%")
     print(f"Запросов в секунду: {results['requests_per_second']:.2f}")
+    
+    if args.num_requests:
+        print(f"Общее время выполнения {args.num_requests} запросов: {results['total_duration']:.2f} секунд")
     
     if results['successful_requests'] > 0:
         print("\nВремя ответа (секунды):")
@@ -210,4 +222,8 @@ def main():
         print(f"\nРезультаты сохранены в {args.output_file}")
 
 if __name__ == '__main__':
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nТестирование прервано пользователем.")
+        sys.exit(0)

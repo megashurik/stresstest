@@ -13,7 +13,7 @@ A simple yet powerful tool for load testing web servers using Python.
 
 ## Installation
 ```bash
-pip install requests tqdm
+pip install requests tqdm aiohttp
 ```
 
 ## Usage
